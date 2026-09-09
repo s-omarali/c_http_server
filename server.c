@@ -68,6 +68,7 @@ int main()
         
         memset(buffer, 0, BUFFER_SIZE); // clear buffer
         int valread = read(client_fd, buffer, sizeof(buffer)-1); // read data from client
+        printf("Data received from client: %s\n", buffer);
         if (valread < 0)
         {
             perror("read failed");
@@ -78,15 +79,48 @@ int main()
         buffer[valread] = '\0';
         printf("Data received from client: %s\n", buffer);
 
-        // build response from html file
+        // parse request and route based on the path
+        char method[16], path[256];
+        char content_type[64];
+        sscanf(buffer, "%s %s", method, path); // parse method and path from the request line
+        printf("Request method: %s, Request path: %s\n", method, path);
 
+        // routing
+        if (strcmp(path, "/") == 0)
+        {
+            strcpy(path, "index.html"); // serve index.html for root path
+            content_type[0] = '\0'; // clear content_type
+            strcat(content_type, "text/html"); // set content type for HTML file
+        }
+        else if (strcmp(path, "/index.js") == 0)
+        {
+            strcpy(path, "index.js"); // serve index.js for /index.js path
+            content_type[0] = '\0'; // clear content_type
+            strcat(content_type, "application/javascript"); // set content type for JS file
+        }
+        else
+        {
+            // send 404 response to client
+            // const char *not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+            char not_found_response[BUFFER_SIZE];
+            size_t file_size = strlen("404 Not Found");
+            snprintf(not_found_response, sizeof(not_found_response), "HTTP/1.1 404 Not Found\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n", content_type, file_size); // build HTTP response header with content length and type
+            write(client_fd, not_found_response, strlen(not_found_response));  // send 404 response to client socket
+            close(client_fd);
+            continue;
+        }
+
+
+        // build response from html file
         // open file and read its contents
-        FILE *file = fopen("index.html", "rb"); // open in binary mode to read raw bytes to prevent issues with line endings on different platforms
+        FILE *file = fopen(path, "rb"); // open in binary mode to read raw bytes to prevent issues with line endings on different platforms
         if (file == NULL)
         {
             perror("fopen failed");
             // send 404 response to client
-            const char *not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+            char not_found_response[BUFFER_SIZE];
+            size_t file_size = strlen("404 Not Found");
+            snprintf(not_found_response, sizeof(not_found_response), "HTTP/1.1 404 Not Found\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n", content_type, file_size);
             write(client_fd, not_found_response, strlen(not_found_response));  // send 404 response to client socket
             close(client_fd);
             continue;
@@ -95,7 +129,7 @@ int main()
         // get file size before reading
         fseek(file, 0, SEEK_END);
         long int file_size = ftell(file); // get current file pointer position which is the size of the file
-        printf("File size of index.html = %ld bytes\n", file_size);
+        printf("File size of %s = %ld bytes\n", path, file_size);
         fseek(file, 0, SEEK_SET); // reset file pointer to beginning of file
 
         // read file contents into response buffer
@@ -113,7 +147,7 @@ int main()
         // two seperate write calls to send the response header and body separately
         // send response header to client
         char header[BUFFER_SIZE];
-        snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n", file_size); // build HTTP response header with content length and type
+        snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n", content_type, file_size); // build HTTP response header with content length and type
         if (write(client_fd, header, strlen(header)) < 0)
         {
             perror("write failed");
