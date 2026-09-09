@@ -6,8 +6,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
+#define BUFFER_SIZE 1024
 int main()
 {
+    char buffer[BUFFER_SIZE];
     // create socket file descriptor. need domain, type, protocol
     int server_fd = socket(AF_INET, SOCK_STREAM, 0); // AF_INET = IPv4, SOCK_STREAM = TCP, 0 = default protocol
     if (server_fd < 0)
@@ -64,11 +66,77 @@ int main()
         }
         printf("Client connected successfully. Client IP = %s, Client Port = %d\n", inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
         
+        memset(buffer, 0, BUFFER_SIZE); // clear buffer
+        int valread = read(client_fd, buffer, sizeof(buffer)-1); // read data from client
+        if (valread < 0)
+        {
+            perror("read failed");
+            close(client_fd);
+            continue;
+        }
+        // null terminate the buffer to make it a valid string. thats why we read sizeof(buffer)-1 bytes to leave space for the null terminator
+        buffer[valread] = '\0';
+        printf("Data received from client: %s\n", buffer);
+
+        // build response from html file
+
+        // open file and read its contents
+        FILE *file = fopen("index.html", "rb"); // open in binary mode to read raw bytes to prevent issues with line endings on different platforms
+        if (file == NULL)
+        {
+            perror("fopen failed");
+            // send 404 response to client
+            const char *not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+            write(client_fd, not_found_response, strlen(not_found_response));  // send 404 response to client socket
+            close(client_fd);
+            continue;
+        }
+
+        // get file size before reading
+        fseek(file, 0, SEEK_END);
+        long int file_size = ftell(file); // get current file pointer position which is the size of the file
+        printf("File size of index.html = %ld bytes\n", file_size);
+        fseek(file, 0, SEEK_SET); // reset file pointer to beginning of file
+
+        // read file contents into response buffer
+        char *response = malloc(file_size + 1); // allocate memory for response. +1 for null terminator
+        if (response == NULL)
+        {
+            perror("malloc failed");
+            fclose(file);
+            close(client_fd);
+            continue;
+        }
+        fread(response, 1, file_size, file); // read file contents into response buffer
+        response[file_size] = '\0'; // null terminate the response buffer
+
+        // two seperate write calls to send the response header and body separately
+        // send response header to client
+        char header[BUFFER_SIZE];
+        snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n", file_size); // build HTTP response header with content length and type
+        if (write(client_fd, header, strlen(header)) < 0)
+        {
+            perror("write failed");
+            close(client_fd);
+            free(response);
+            fclose(file);
+            continue;
+        }
+
+        // send response body to client
+        if (write(client_fd, response, file_size) < 0)
+        {
+            perror("write failed");
+            close(client_fd);
+            free(response);
+            fclose(file);
+            continue;
+        }
+        free(response); // free allocated memory for response
+        fclose(file);
         close(client_fd); // close immediately after accepting for this example, in a real server you would handle the client connection
+
     }
     
-    
-
-
 
 }
